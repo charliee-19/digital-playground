@@ -4,7 +4,7 @@ Welcome to **Digital Funfair**, a collection of fun, interactive web experiments
 
 ## Live Site
 
-Check it out here: [Digital Playground](https://<charliee-19>.github.io/<digital-Funfair>/)
+Check it out here: [Digital Funfair](https://<charliee-19>.github.io/<digital-Funfair>/)
 
 ## Projects
 
