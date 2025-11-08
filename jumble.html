@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Jumble & 12-digit Code — Toy Encoder</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#7c5cff;--muted:#9aa6bf;--glass: rgba(255,255,255,0.03)}
+    *{box-sizing:border-box}
+    body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; background:linear-gradient(180deg,#071026 0%, #081028 60%); color:#e6eef8; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px}
+    .wrap{width:100%; max-width:980px}
+    header{display:flex;align-items:center;gap:16px;margin-bottom:18px}
+    header h1{font-size:20px;margin:0}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .card{background:linear-gradient(180deg,var(--card), rgba(11,18,32,0.6)); padding:18px;border-radius:12px;box-shadow:0 6px 24px rgba(2,8,23,0.6); border:1px solid rgba(255,255,255,0.03)}
+    label{font-size:13px;color:var(--muted);display:block;margin-bottom:8px}
+    textarea,input[type="text"]{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--glass); color:inherit;font-size:15px}
+    .row{display:flex;gap:8px;margin-top:8px}
+    button{background:var(--accent);color:white;border:0;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .small{font-size:13px;padding:8px 10px}
+    pre{white-space:pre-wrap;word-break:break-word;background:transparent;padding:12px;border-radius:8px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace}
+    .hint{font-size:13px;color:var(--muted);margin-top:10px}
+    .footer{margin-top:14px;font-size:13px;color:var(--muted)}
+    @media (max-width:800px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Jumble Encoder — 12-digit code (toy)</h1>
+      <div style="color:var(--muted);font-size:13px">Generates a new 12-digit code for each phrase; code recreates substitution table.</div>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <label for="phrase">Enter phrase to encode</label>
+        <textarea id="phrase" rows="5" placeholder="Type anything: words, numbers, punctuation...">Hello from the secret bunker</textarea>
+        <div class="row" style="margin-top:12px">
+          <button id="encodeBtn">Encode (generate 12-digit code)</button>
+          <button class="ghost small" id="clearPhrase">Clear</button>
+        </div>
+
+        <div style="margin-top:14px">
+          <label>Generated 12-digit code</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="codeOut" type="text" readonly />
+            <button class="small" id="copyCode">Copy</button>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <label>Jumbled output</label>
+          <pre id="jumbleOut"></pre>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="copyJumble" class="small">Copy Jumble</button>
+            <button id="showMap" class="ghost small">Show substitution map</button>
+          </div>
+        </div>
+
+        <div class="hint">Notes: This is a reversible toy substitution cipher. The 12-digit code determines the mapping. Not secure for real secrets.</div>
+      </div>
+
+      <div class="card">
+        <label for="codeIn">Enter 12-digit code to decode</label>
+        <input id="codeIn" type="text" placeholder="e.g. 012345678901" maxlength="12" />
+
+        <label style="margin-top:12px">Enter jumble to decode</label>
+        <textarea id="jumbleIn" rows="5" placeholder="Paste the jumble here"></textarea>
+
+        <div class="row" style="margin-top:8px">
+          <button id="decodeBtn">Decode</button>
+          <button class="ghost" id="clearDecode">Clear</button>
+        </div>
+
+        <div style="margin-top:12px">
+          <label>Recovered phrase</label>
+          <pre id="recoveredOut"></pre>
+        </div>
+
+        <div class="footer">Tip: copy both the code and jumble when you encode. If the wrong code is used the recovered text will look wrong.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <label>Substitution table (click to toggle)</label>
+      <pre id="mapOut" style="display:none;max-height:320px;overflow:auto"></pre>
+    </div>
+  </div>
+
+  <script>
+    // Printable ASCII 32..126
+    const CHARSET = [];
+    for (let i=32;i<=126;i++) CHARSET.push(String.fromCharCode(i));
+
+    function make12DigitCode(){
+      // use crypto RNG for fresh code
+      const arr = new Uint8Array(12);
+      crypto.getRandomValues(arr);
+      return Array.from(arr).map(b => String(b % 10)).join('');
+    }
+
+    // Simple non-cryptographic hash (xfnv1a) to produce 32-bit seed from code string
+    function xfnv1a(str){
+      let h = 2166136261 >>> 0;
+      for (let i=0;i<str.length;i++){
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
+      }
+      return h >>> 0;
+    }
+
+    // Mulberry32 PRNG
+    function mulberry32(a){
+      return function(){
+        a |= 0;
+        a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      }
+    }
+
+    function buildTablesFromCode(code12){
+      if (!/^[0-9]{12}$/.test(code12)) throw new Error('Code must be 12 digits');
+      const seed = xfnv1a(code12.toString());
+      const rng = mulberry32(seed);
+      const shuffled = CHARSET.slice();
+      // Fisher-Yates shuffle using rng
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      const enc = {};
+      const dec = {};
+      for (let i=0;i<CHARSET.length;i++){
+        enc[CHARSET[i]] = shuffled[i];
+        dec[shuffled[i]] = CHARSET[i];
+      }
+      return {enc,dec,shuffled};
+    }
+
+    function encodePhrase(plain){
+      const code = make12DigitCode();
+      const {enc, shuffled} = buildTablesFromCode(code);
+      let jumble = '';
+      for (const ch of plain) jumble += (enc[ch] ?? ch);
+      return {code, jumble, shuffled};
+    }
+
+    function decodeJumble(code12, jumble){
+      const {dec} = buildTablesFromCode(code12);
+      let out = '';
+      for (const ch of jumble) out += (dec[ch] ?? ch);
+      return out;
+    }
+
+    // UI wiring
+    const phraseEl = document.getElementById('phrase');
+    const encodeBtn = document.getElementById('encodeBtn');
+    const codeOut = document.getElementById('codeOut');
+    const jumbleOut = document.getElementById('jumbleOut');
+    const copyCode = document.getElementById('copyCode');
+    const copyJumble = document.getElementById('copyJumble');
+    const showMap = document.getElementById('showMap');
+    const mapOut = document.getElementById('mapOut');
+
+    const codeIn = document.getElementById('codeIn');
+    const jumbleIn = document.getElementById('jumbleIn');
+    const decodeBtn = document.getElementById('decodeBtn');
+    const recoveredOut = document.getElementById('recoveredOut');
+
+    encodeBtn.addEventListener('click', ()=>{
+      try{
+        const plain = phraseEl.value;
+        const {code, jumble, shuffled} = encodePhrase(plain);
+        codeOut.value = code;
+        jumbleOut.textContent = jumble;
+        // prepare map text for display
+        const pairs = CHARSET.map((c,i)=> `${c} → ${shuffled[i]}`);
+        mapOut.textContent = pairs.join('\n');
+      }catch(e){
+        alert('Error: '+e.message);
+      }
+    });
+
+    copyCode.addEventListener('click', async ()=>{
+      if (codeOut.value) await navigator.clipboard.writeText(codeOut.value);
+    });
+    copyJumble.addEventListener('click', async ()=>{
+      if (jumbleOut.textContent) await navigator.clipboard.writeText(jumbleOut.textContent);
+    });
+
+    showMap.addEventListener('click', ()=>{
+      mapOut.style.display = mapOut.style.display === 'none' ? 'block' : 'none';
+    });
+
+    decodeBtn.addEventListener('click', ()=>{
+      try{
+        const code = codeIn.value.trim();
+        const jum = jumbleIn.value;
+        const res = decodeJumble(code, jum);
+        recoveredOut.textContent = res;
+      }catch(e){
+        alert('Decode error: '+e.message);
+      }
+    });
+
+    // small helpers
+    document.getElementById('clearPhrase').addEventListener('click', ()=>{ phraseEl.value=''; codeOut.value=''; jumbleOut.textContent=''; mapOut.style.display='none'; mapOut.textContent=''; });
+    document.getElementById('clearDecode').addEventListener('click', ()=>{ codeIn.value=''; jumbleIn.value=''; recoveredOut.textContent=''; });
+
+  </script>
+</body>
+</html>
